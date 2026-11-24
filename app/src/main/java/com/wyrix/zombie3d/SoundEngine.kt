@@ -51,13 +51,15 @@ class SoundEngine(private val context: Context) {
         Thread({
             try {
                 // order matters: gun + hit sounds first so they are ready almost immediately
-                gunPcm = arrayOf(
-                    buildGunPcm(0.40f, 150f, 1.00f, 150f, 0.55f, 16f, 0.65f, 70f, 0.30f),  // M1911 - sharp crack
-                    buildGunPcm(0.30f, 170f, 0.80f, 190f, 0.40f, 20f, 0.50f, 45f, 0.25f),  // MP5 - snappy
-                    buildGunPcm(0.45f, 120f, 0.95f, 120f, 0.70f, 13f, 0.80f, 85f, 0.35f),  // M4A1
-                    buildGunPcm(0.55f, 100f, 1.00f, 85f, 0.95f, 10f, 0.90f, 110f, 0.40f),  // SCAR-H - heavy
-                    buildGunPcm(1.10f, 70f, 1.00f, 60f, 1.15f, 5f, 1.00f, 170f, 0.50f)     // AWM - huge boom + echo
+                // Real recorded shots (assets/sfx/shot_0..4.wav); synthesized sound is only a fallback.
+                val synth = arrayOf(
+                    buildGunPcm(0.40f, 150f, 1.00f, 150f, 0.55f, 16f, 0.65f, 70f, 0.30f),
+                    buildGunPcm(0.30f, 170f, 0.80f, 190f, 0.40f, 20f, 0.50f, 45f, 0.25f),
+                    buildGunPcm(0.45f, 120f, 0.95f, 120f, 0.70f, 13f, 0.80f, 85f, 0.35f),
+                    buildGunPcm(0.55f, 100f, 1.00f, 85f, 0.95f, 10f, 0.90f, 110f, 0.40f),
+                    buildGunPcm(1.10f, 70f, 1.00f, 60f, 1.15f, 5f, 1.00f, 170f, 0.50f)
                 )
+                gunPcm = Array(synth.size) { i -> loadWav("sfx/shot_$i.wav") ?: synth[i] }
                 hitPcm = buildFleshHitPcm()
                 hurtPcm = buildHurtPcm()
                 pickupPcm = buildPickupPcm()
@@ -79,6 +81,44 @@ class SoundEngine(private val context: Context) {
             } catch (_: Throwable) {
             }
         }, "sound-init").start()
+    }
+
+    /** Minimal WAV reader: 16-bit PCM mono at the engine sample rate. Returns null on any problem. */
+    private fun loadWav(path: String): ShortArray? {
+        return try {
+            val b = context.assets.open(path).use { it.readBytes() }
+            var pos = 12
+            var dataStart = -1
+            var dataLen = 0
+            var rate = 0
+            var channels = 1
+            var bits = 16
+            while (pos + 8 <= b.size) {
+                val id = String(b, pos, 4, Charsets.US_ASCII)
+                val len = (b[pos + 4].toInt() and 0xFF) or ((b[pos + 5].toInt() and 0xFF) shl 8) or
+                    ((b[pos + 6].toInt() and 0xFF) shl 16) or ((b[pos + 7].toInt() and 0xFF) shl 24)
+                if (id == "fmt ") {
+                    channels = (b[pos + 10].toInt() and 0xFF) or ((b[pos + 11].toInt() and 0xFF) shl 8)
+                    rate = (b[pos + 12].toInt() and 0xFF) or ((b[pos + 13].toInt() and 0xFF) shl 8) or
+                        ((b[pos + 14].toInt() and 0xFF) shl 16) or ((b[pos + 15].toInt() and 0xFF) shl 24)
+                    bits = (b[pos + 22].toInt() and 0xFF) or ((b[pos + 23].toInt() and 0xFF) shl 8)
+                } else if (id == "data") {
+                    dataStart = pos + 8
+                    dataLen = minOf(len, b.size - dataStart)
+                    break
+                }
+                pos += 8 + len + (len and 1)
+            }
+            if (dataStart < 0 || bits != 16 || channels != 1 || rate != sampleRate) return null
+            val n = dataLen / 2
+            val out = ShortArray(n)
+            for (i in 0 until n) {
+                out[i] = ((b[dataStart + i * 2].toInt() and 0xFF) or (b[dataStart + i * 2 + 1].toInt() shl 8)).toShort()
+            }
+            out
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     fun resumeMusic() {

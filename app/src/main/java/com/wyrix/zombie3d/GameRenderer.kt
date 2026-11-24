@@ -181,8 +181,8 @@ class GameRenderer(
         "    float diff = max(dot(n, l), 0.0);\n" +
         "    float hemi = n.y * 0.5 + 0.5;\n" +
         "    vec3 amb = mix(vec3(0.16, 0.15, 0.14), uSkyAmbient, hemi);\n" +
-        "    float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.20;\n" +
-        "    float spec = pow(max(dot(n, h), 0.0), 36.0) * 0.30;\n" +
+        "    float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.10;\n" +
+        "    float spec = pow(max(dot(n, h), 0.0), 20.0) * 0.07;\n" +
         "    float dMuzzle = length(uMuzzlePos - vWorldPos);\n" +
         "    float flash = uMuzzleIntensity / (1.0 + dMuzzle * dMuzzle * 0.45);\n" +
         "    vec3 lit = baseCol * (amb + uSunColor * diff * 0.78 + rim) + uSunColor * spec + vec3(1.0, 0.72, 0.30) * flash * (0.4 + 0.6 * diff);\n" +
@@ -838,7 +838,8 @@ class GameRenderer(
             Matrix.rotateM(gunLocal, 0, -pitch - kick * 7f + reloadTilt, 1f, 0f, 0f)
         } else {
             // first person: hold the gun lower-right in the camera view
-            Matrix.translateM(gunLocal, 0, if (engine.isScoped) -0.02f else -0.17f, 1.36f - (if (reloading) 0.16f else 0f), 0.46f - kick * 0.14f)
+            // portrait screens are narrow: keep the gun close to the centre line and only slightly below eye level
+            Matrix.translateM(gunLocal, 0, if (engine.isScoped) -0.02f else -0.085f, 1.455f - (if (reloading) 0.12f else 0f), 0.40f - kick * 0.12f)
             Matrix.rotateM(gunLocal, 0, -pitch - kick * 5f, 1f, 0f, 0f)
         }
         Matrix.multiplyMM(gunWorld, 0, baseM, 0, gunLocal, 0)
@@ -934,6 +935,8 @@ class GameRenderer(
         val flash = z.hitFlash > 0f
         val vt = variantTint[z.gaitStyle and 3]
         var r = vt[0]; var g = vt[1]; var b = vt[2]
+        // grimy, sickly look: darker and slightly desaturated so they read as rotting, not plastic
+        r *= 0.93f; g *= 0.91f; b *= 0.88f
         if (z.type == 3) { r *= 1.05f; g *= 0.68f; b *= 0.66f }
         if (flash) { r = 1.35f; g = 0.45f; b = 0.45f }
 
