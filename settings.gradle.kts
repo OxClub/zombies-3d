@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "WyrixZombie3D"
+rootProject.name = "ZombieShooter"
 include(":app")

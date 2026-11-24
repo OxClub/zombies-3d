@@ -70,6 +70,16 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
         var isAttacking: Boolean = false
     )
 
+    class Corpse3D(
+        val x: Float,
+        val z: Float,
+        val yaw: Float,
+        val type: Int,
+        val gait: Int,
+        val scale: Float,
+        var age: Float = 0f
+    )
+
     class DamagePopup(
         val amount: Int,
         val isHeadshot: Boolean,
@@ -134,6 +144,16 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
     var muzzleFlashTimer = 0f
     var isScoped = false
     var isTppMode = true // TPP ON by default so player body & gun are clearly visible from above/behind!
+
+    // Virtual joystick axes: x = strafe right (+), y = forward (+). Range -1..1.
+    @Volatile var playerIsMoving = false
+    @Volatile var moveAxisX = 0f
+    @Volatile var moveAxisY = 0f
+    @Volatile var shotCounter = 0
+    val corpses = ArrayList<Corpse3D>()
+
+    // Distance from the player centre to the muzzle of each gun (index matches `guns`).
+    private val gunMuzzleFwd = floatArrayOf(0.56f, 0.86f, 1.14f, 1.16f, 1.49f)
 
     @Volatile var moveForwardPressed = false
     @Volatile var moveBackwardPressed = false
@@ -308,7 +328,7 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
     fun triggerReload() {
         if (reloadTimer <= 0f && currentAmmo < maxAmmo) {
             reloadTimer = 0.95f
-            sfx.playPickup()
+            sfx.playReload()
         }
     }
 
@@ -316,7 +336,6 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
         val sens = if (isScoped) 72f else 135f
         playerYaw -= dxNorm * sens
         playerPitch = (playerPitch - dyNorm * (sens * 0.65f)).coerceIn(-24f, 24f)
-        playerStrafeVel = (-dxNorm * 16f).coerceIn(-3.5f, 3.5f)
     }
 
     fun deploySelectedStage() {
@@ -340,6 +359,9 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
         playerStrafeVel = 0f
         moveForwardPressed = false
         moveBackwardPressed = false
+        moveAxisX = 0f
+        moveAxisY = 0f
+        corpses.clear()
         hp = maxHp
         reloadTimer = 0f
         isFiring = false
@@ -381,6 +403,8 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
     }
 
     fun returnToMapFromGameOver() {
+        moveAxisX = 0f
+        moveAxisY = 0f
         moveForwardPressed = false
         moveBackwardPressed = false
         state = State.MAP
@@ -445,6 +469,13 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
             if (dp.life <= 0f) popIter.remove()
         }
 
+        val cIter = corpses.iterator()
+        while (cIter.hasNext()) {
+            val cp = cIter.next()
+            cp.age += dt
+            if (cp.age > 9f) cIter.remove()
+        }
+
         if (state != State.PLAYING) return
 
         if (fireCooldown > 0f) fireCooldown -= dt
@@ -463,22 +494,20 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
         val rightX = cos(yawRad).toFloat()
         val rightZ = -sin(yawRad).toFloat()
 
-        var moveInput = 0f
-        if (moveForwardPressed) moveInput += 1f
-        if (moveBackwardPressed) moveInput -= 1f
-
+        // True screen-right direction (forward x up) for a camera looking along `fwd`.
+        val trueRightX = -cos(yawRad).toFloat()
+        val trueRightZ = sin(yawRad).toFloat()
+        var ax = moveAxisX
+        var ay = moveAxisY
+        val axLen = hypot(ax, ay)
+        if (axLen > 1f) { ax /= axLen; ay /= axLen }
         var isMoving = false
-        if (moveInput != 0f) {
-            playerX += fwdX * heroSpeed * moveInput * dt
-            playerZ += fwdZ * heroSpeed * moveInput * dt
+        if (axLen > 0.08f) {
+            playerX += (fwdX * ay + trueRightX * ax) * heroSpeed * dt
+            playerZ += (fwdZ * ay + trueRightZ * ax) * heroSpeed * dt
             isMoving = true
         }
-        if (kotlin.math.abs(playerStrafeVel) > 0.12f) {
-            playerX += rightX * playerStrafeVel * dt
-            playerZ += rightZ * playerStrafeVel * dt
-            isMoving = true
-        }
-        playerStrafeVel *= (1f - 7f * dt).coerceIn(0f, 1f)
+        playerIsMoving = isMoving
 
         val resolvedPlayer = resolveSolidCollisions(playerX, playerZ, 0.44f)
         playerX = resolvedPlayer.first
@@ -523,18 +552,22 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
         currentAmmo--
         if (currentAmmo == 0) {
             reloadTimer = 0.95f
+            sfx.playReload()
         }
 
         val rad = Math.toRadians(playerYaw.toDouble())
         val fx = sin(rad).toFloat()
         val fz = cos(rad).toFloat()
-        val muzzleX = playerX + fx * 1.15f
-        val muzzleZ = playerZ + fz * 1.15f
+        val fwdLen = gunMuzzleFwd[equippedGunIndex.coerceIn(0, gunMuzzleFwd.size - 1)]
+        // gun is held in the right hand, 0.13 m to the true right of the body centre
+        val muzzleX = playerX + fx * fwdLen - cos(rad).toFloat() * 0.13f
+        val muzzleZ = playerZ + fz * fwdLen + sin(rad).toFloat() * 0.13f
 
         recoilKick = 0.25f
-        muzzleFlashTimer = 0.06f
+        muzzleFlashTimer = 0.07f
+        shotCounter++
         fireCooldown = g.fireRate
-        sfx.playShot(equippedGunIndex >= 3)
+        sfx.playShot(equippedGunIndex)
 
         val spread = if (equippedGunIndex == 1) (Random.nextFloat() - 0.5) * 0.04 else 0.0
         val a = rad + spread
@@ -543,7 +576,7 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
                 muzzleX, 1.32f, muzzleZ,
                 sin(a).toFloat() * 52f, cos(a).toFloat() * 52f,
                 Math.toDegrees(a).toFloat(),
-                1.0f, g.damage, 1.0f, 0.85f, 0.35f
+                1.0f, g.damage, 1.0f, 0.90f, 0.55f
             )
         )
     }
@@ -561,13 +594,14 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
         }
         val gait = Random.nextInt(4)
         val hpScale = 1f + (activeRoomNumber - 1) * 0.05f
+        val vary = 0.96f + Random.nextFloat() * 0.10f
         zombies.add(
             when (type) {
-                0 -> Zombie3D(x, z, 65f * hpScale, 65f * hpScale, 1.80f, 1.05f, 0, gait)
-                1 -> Zombie3D(x, z, 72f * hpScale, 72f * hpScale, 2.15f, 1.04f, 1, 2)
-                2 -> Zombie3D(x, z, 195f * hpScale, 195f * hpScale, 1.50f, 1.28f, 2, 3)
-                3 -> Zombie3D(x, z, 260f * hpScale, 260f * hpScale, 1.65f, 1.38f, 3, 3)
-                else -> Zombie3D(x, z, 52f * hpScale, 52f * hpScale, 2.45f, 1.05f, 6, 2)
+                0 -> Zombie3D(x, z, 65f * hpScale, 65f * hpScale, 1.80f, 1.00f * vary, 0, gait)
+                1 -> Zombie3D(x, z, 72f * hpScale, 72f * hpScale, 2.15f, 1.00f * vary, 1, 2)
+                2 -> Zombie3D(x, z, 195f * hpScale, 195f * hpScale, 1.50f, 1.00f, 2, 3)
+                3 -> Zombie3D(x, z, 260f * hpScale, 260f * hpScale, 1.65f, 1.28f, 3, 3)
+                else -> Zombie3D(x, z, 52f * hpScale, 52f * hpScale, 2.45f, 1.15f, 6, 2)
             }
         )
     }
@@ -638,6 +672,8 @@ class GameEngine(context: Context, private val sfx: SoundEngine) {
             if (z.hp <= 0f) {
                 kills++
                 roomRemainingToClear = max(0, roomRemainingToClear - 1)
+                if (corpses.size > 8) corpses.removeAt(0)
+                corpses.add(Corpse3D(z.x, z.z, z.yaw, z.type, z.gaitStyle, z.scale))
                 if (bloodDecals.size > 45) bloodDecals.removeAt(0)
                 bloodDecals.add(BloodDecal3D(z.x, z.z, 1.65f * z.scale, Random.nextFloat() * 360f))
                 spawnBloodSpray(z.x, 0.9f, z.z, 0f, 0f, 16)

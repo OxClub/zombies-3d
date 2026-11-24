@@ -28,10 +28,15 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
     private val cWhite = Color.rgb(246, 248, 250)
     private val cDark = Color.rgb(16, 19, 24)
 
-    private var aimPointer = -1
-    private var movePointer = -1
+    private var lookPointer = -1
+    private var joyPointer = -1
+    private var firePointer = -1
     private var lastTouchX = 0f
     private var lastTouchY = 0f
+    private var joyCx = 0f
+    private var joyCy = 0f
+    private var joyKnobX = 0f
+    private var joyKnobY = 0f
 
     private fun playBtnRect(): RectF {
         val w = width * 0.62f
@@ -60,33 +65,31 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
         return RectF(cx - w * 0.5f, cy - h * 0.5f, cx + w * 0.5f, cy + h * 0.5f)
     }
 
-    // Left-thumb Forward & Backward movement buttons
-    private fun forwardBtnRect(): RectF {
-        val r = 28f * density
-        val cx = 48f * density
-        val cy = height - 168f * density
-        return RectF(cx - r, cy - r, cx + r, cy + r)
-    }
+    // Floating virtual joystick (left thumb) + FIRE button (right thumb)
+    private fun joyRadius(): Float = 58f * density
+    private fun joyDefaultCx(): Float = 86f * density
+    private fun joyDefaultCy(): Float = height - 168f * density
+    private fun inJoystickZone(x: Float, y: Float): Boolean = x < width * 0.42f && y > height * 0.40f
 
-    private fun backwardBtnRect(): RectF {
-        val r = 28f * density
-        val cx = 48f * density
-        val cy = height - 102f * density
+    private fun fireBtnRect(): RectF {
+        val r = 44f * density
+        val cx = width - 72f * density
+        val cy = height - 138f * density
         return RectF(cx - r, cy - r, cx + r, cy + r)
     }
 
     // Right-side Tactical Controls: Reload, Scope, Gun Switch, TPP/FPP Toggle
     private fun reloadBtnRect(): RectF {
-        val r = 28f * density
-        val cx = width - 46f * density
-        val cy = height - 56f * density
+        val r = 26f * density
+        val cx = width - 40f * density
+        val cy = height - 50f * density
         return RectF(cx - r, cy - r, cx + r, cy + r)
     }
 
     private fun scopeBtnRect(): RectF {
-        val r = 25f * density
-        val cx = width - 46f * density
-        val cy = height - 120f * density
+        val r = 24f * density
+        val cx = width - 108f * density
+        val cy = height - 48f * density
         return RectF(cx - r, cy - r, cx + r, cy + r)
     }
 
@@ -115,6 +118,7 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
                 when (engine.state) {
                     GameEngine.State.INTRO -> {
                         engine.skipIntroToMap()
+                        invalidate()
                         return true
                     }
                     GameEngine.State.MAP -> {
@@ -192,16 +196,9 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
                         return true
                     }
                     GameEngine.State.PLAYING -> {
-                        if (forwardBtnRect().contains(x, y)) {
-                            movePointer = pid
-                            engine.moveForwardPressed = true
-                            engine.moveBackwardPressed = false
-                            return true
-                        }
-                        if (backwardBtnRect().contains(x, y)) {
-                            movePointer = pid
-                            engine.moveBackwardPressed = true
-                            engine.moveForwardPressed = false
+                        if (fireBtnRect().contains(x, y)) {
+                            firePointer = pid
+                            engine.isFiring = true
                             return true
                         }
                         if (reloadBtnRect().contains(x, y)) {
@@ -220,10 +217,19 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
                             engine.toggleCameraPerspective()
                             return true
                         }
-                        aimPointer = pid
-                        lastTouchX = x
-                        lastTouchY = y
-                        engine.isFiring = true
+                        if (joyPointer == -1 && inJoystickZone(x, y)) {
+                            joyPointer = pid
+                            joyCx = x; joyCy = y
+                            joyKnobX = x; joyKnobY = y
+                            engine.moveAxisX = 0f
+                            engine.moveAxisY = 0f
+                            return true
+                        }
+                        if (lookPointer == -1) {
+                            lookPointer = pid
+                            lastTouchX = x
+                            lastTouchY = y
+                        }
                         return true
                     }
                 }
@@ -231,44 +237,67 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
 
             MotionEvent.ACTION_MOVE -> {
                 if (engine.state == GameEngine.State.PLAYING) {
-                    if (movePointer != -1) {
-                        val mIdx = e.findPointerIndex(movePointer)
-                        if (mIdx >= 0) {
-                            val mx = e.getX(mIdx)
-                            val my = e.getY(mIdx)
-                            engine.moveForwardPressed = forwardBtnRect().contains(mx, my) || my < forwardBtnRect().centerY()
-                            engine.moveBackwardPressed = backwardBtnRect().contains(mx, my) || my > backwardBtnRect().centerY()
+                    if (joyPointer != -1) {
+                        val jIdx = e.findPointerIndex(joyPointer)
+                        if (jIdx >= 0) {
+                            var dx = e.getX(jIdx) - joyCx
+                            var dy = e.getY(jIdx) - joyCy
+                            val rad = joyRadius()
+                            val len = hypot(dx, dy)
+                            if (len > rad) { dx = dx / len * rad; dy = dy / len * rad }
+                            joyKnobX = joyCx + dx
+                            joyKnobY = joyCy + dy
+                            var ax = dx / rad
+                            var ay = -dy / rad
+                            if (hypot(ax, ay) < 0.12f) { ax = 0f; ay = 0f }
+                            engine.moveAxisX = ax
+                            engine.moveAxisY = ay
                         }
                     }
-                    if (aimPointer != -1) {
-                        val aIdx = e.findPointerIndex(aimPointer)
-                        if (aIdx >= 0) {
-                            val nx = e.getX(aIdx)
-                            val ny = e.getY(aIdx)
+                    if (lookPointer != -1) {
+                        val lIdx = e.findPointerIndex(lookPointer)
+                        if (lIdx >= 0) {
+                            val nx = e.getX(lIdx)
+                            val ny = e.getY(lIdx)
                             val dx = nx - lastTouchX
                             val dy = ny - lastTouchY
                             lastTouchX = nx
                             lastTouchY = ny
                             engine.applyAimDrag(dx / width, dy / height)
-                            engine.isFiring = true
                         }
                     }
                 }
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
-                if (pid == movePointer) {
-                    movePointer = -1
-                    engine.moveForwardPressed = false
-                    engine.moveBackwardPressed = false
-                }
-                if (pid == aimPointer || e.actionMasked == MotionEvent.ACTION_CANCEL) {
-                    aimPointer = -1
-                    engine.isFiring = false
+                if (e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    releaseAllPointers()
+                } else {
+                    if (pid == joyPointer) {
+                        joyPointer = -1
+                        engine.moveAxisX = 0f
+                        engine.moveAxisY = 0f
+                    }
+                    if (pid == firePointer) {
+                        firePointer = -1
+                        engine.isFiring = false
+                    }
+                    if (pid == lookPointer) {
+                        lookPointer = -1
+                    }
                 }
             }
         }
         return true
+    }
+
+    private fun releaseAllPointers() {
+        joyPointer = -1
+        firePointer = -1
+        lookPointer = -1
+        engine.moveAxisX = 0f
+        engine.moveAxisY = 0f
+        engine.isFiring = false
     }
 
     private fun stageNodeCoords(slot: Int): Pair<Float, Float> {
@@ -303,19 +332,25 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
         text.textAlign = Paint.Align.CENTER
         text.textSize = 22f * density
         text.color = cRed
-        c.drawText("WYRIX: DEAD RAID 3D", width * 0.5f, height * 0.28f, text)
+        text.textSize = 34f * density
+        c.drawText("ZOMBIE", width * 0.5f, height * 0.24f, text)
+        c.drawText("SHOOTER", width * 0.5f, height * 0.24f + 40f * density, text)
 
         text.textSize = 15f * density
         text.color = cWhite
         c.drawText("1,200+ INFECTED ROOMS", width * 0.5f, height * 0.46f, text)
         c.drawText("TPP & FPP TACTICAL COMBAT", width * 0.5f, height * 0.51f, text)
-        c.drawText("SURVIVE THE LURCHER HORDE...", width * 0.5f, height * 0.56f, text)
+        c.drawText("SURVIVE THE UNDEAD HORDE...", width * 0.5f, height * 0.56f, text)
 
         val alpha = ((0.5f + 0.5f * sin(engine.worldTime * 5f)) * 255).toInt()
         text.textSize = 14f * density
         text.color = cAmber
         text.alpha = alpha
-        c.drawText("[ TAP TO ENTER ARMORY & MAP ]", width * 0.5f, height * 0.82f, text)
+        if (ModelBank.ready) {
+            c.drawText("[ TAP TO ENTER ARMORY & MAP ]", width * 0.5f, height * 0.82f, text)
+        } else {
+            c.drawText("LOADING 3D MODELS... " + (ModelBank.progress * 100f).toInt() + "%", width * 0.5f, height * 0.82f, text)
+        }
         text.alpha = 255
     }
 
@@ -526,7 +561,7 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
 
     private fun drawPlayingHud(c: Canvas) {
         val cx = width * 0.5f
-        val cy = height * 0.46f
+        val cy = height * 0.50f
 
         text.textAlign = Paint.Align.LEFT
         text.textSize = 12f * density
@@ -596,9 +631,32 @@ class HudOverlayView(context: Context, private val engine: GameEngine) : View(co
             }
         }
 
-        // Left-Thumb Forward (▲) & Backward (▼) Movement Buttons!
-        drawCircleButton(c, forwardBtnRect(), "▲", if (engine.moveForwardPressed) cNeon else cWhite)
-        drawCircleButton(c, backwardBtnRect(), "▼", if (engine.moveBackwardPressed) cRed else cWhite)
+        // Floating joystick (left thumb)
+        val jr = joyRadius()
+        val bx = if (joyPointer != -1) joyCx else joyDefaultCx()
+        val by = if (joyPointer != -1) joyCy else joyDefaultCy()
+        val kx = if (joyPointer != -1) joyKnobX else bx
+        val ky = if (joyPointer != -1) joyKnobY else by
+        fill.color = Color.argb(if (joyPointer != -1) 95 else 55, 255, 255, 255)
+        c.drawCircle(bx, by, jr, fill)
+        stroke.color = Color.argb(150, 255, 255, 255)
+        stroke.strokeWidth = 2f * density
+        c.drawCircle(bx, by, jr, stroke)
+        fill.color = Color.argb(if (joyPointer != -1) 220 else 130, 245, 178, 48)
+        c.drawCircle(kx, ky, jr * 0.46f, fill)
+
+        // FIRE button (right thumb) - hold to shoot
+        val fr = fireBtnRect()
+        val firing = engine.isFiring
+        fill.color = if (firing) Color.argb(235, 228, 46, 46) else Color.argb(170, 150, 24, 24)
+        c.drawCircle(fr.centerX(), fr.centerY(), fr.width() * 0.5f, fill)
+        stroke.color = Color.argb(230, 255, 190, 170)
+        stroke.strokeWidth = 2.5f * density
+        c.drawCircle(fr.centerX(), fr.centerY(), fr.width() * 0.5f, stroke)
+        text.textAlign = Paint.Align.CENTER
+        text.textSize = 16f * density
+        text.color = cWhite
+        c.drawText("FIRE", fr.centerX(), fr.centerY() + 6f * density, text)
 
         // Bottom-Left Ammo Counter
         val ammoLeft = 22f * density

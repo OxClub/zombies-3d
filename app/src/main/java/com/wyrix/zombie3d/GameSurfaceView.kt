@@ -6,6 +6,11 @@ import android.widget.FrameLayout
 
 class GameSurfaceView(context: Context) : FrameLayout(context) {
 
+    init {
+        // Start decoding all 3D models on a background thread right away.
+        ModelBank.start(context)
+    }
+
     private val sfx = SoundEngine(context)
     private val engine = GameEngine(context, sfx)
     private val glView = GLSurfaceView(context)

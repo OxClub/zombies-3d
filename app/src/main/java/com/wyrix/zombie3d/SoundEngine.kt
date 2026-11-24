@@ -7,47 +7,82 @@ import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.os.SystemClock
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.sin
+import kotlin.math.tanh
 import kotlin.random.Random
 
-class SoundEngine(context: Context) {
+/**
+ * All sounds are synthesised in code. Everything heavy happens on a background thread
+ * so the game window opens instantly (this used to freeze start-up for 10+ seconds).
+ */
+class SoundEngine(private val context: Context) {
     var enabled = true
-    private val sampleRate = 22050
-    private val executor = Executors.newSingleThreadExecutor()
+    private val sampleRate = 32000
+    private val playExec = Executors.newFixedThreadPool(2)
+    private val releaser: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val activeStreams = AtomicInteger(0)
-    private val maxConcurrent = 5
-    private var bgmPlayer: MediaPlayer? = null
+    private val maxConcurrent = 10
+    @Volatile private var bgmPlayer: MediaPlayer? = null
+    @Volatile private var musicWanted = false
 
     private var lastShotMs = 0L
     private var lastHitMs = 0L
     private var lastGroanMs = 0L
     private var lastHurtMs = 0L
 
-    private val riflePcm = buildRiflePcm()
-    private val shotgunPcm = buildShotgunPcm()
-    private val hitPcm = buildFleshHitPcm()
-    private val boomPcm = buildExplosionPcm()
-    private val hurtPcm = buildHurtPcm()
-    private val pickupPcm = buildPickupPcm()
-    private val groan1Pcm = buildZombieGroanPcm(62.0, 44.0, 0.65)
-    private val groan2Pcm = buildZombieGroanPcm(84.0, 52.0, 0.55)
-    private val roarPcm = buildBossRoarPcm()
+    @Volatile private var gunPcm: Array<ShortArray>? = null
+    @Volatile private var hitPcm: ShortArray? = null
+    @Volatile private var boomPcm: ShortArray? = null
+    @Volatile private var hurtPcm: ShortArray? = null
+    @Volatile private var pickupPcm: ShortArray? = null
+    @Volatile private var groan1Pcm: ShortArray? = null
+    @Volatile private var groan2Pcm: ShortArray? = null
+    @Volatile private var roarPcm: ShortArray? = null
+    @Volatile private var reloadPcm: ShortArray? = null
+    @Volatile private var clickPcm: ShortArray? = null
 
     init {
-        try {
-            bgmPlayer = MediaPlayer.create(context, R.raw.horror_bgm)?.apply {
-                isLooping = true
-                setVolume(0.42f, 0.42f)
+        Thread({
+            try {
+                // order matters: gun + hit sounds first so they are ready almost immediately
+                gunPcm = arrayOf(
+                    buildGunPcm(0.40f, 150f, 1.00f, 150f, 0.55f, 16f, 0.65f, 70f, 0.30f),  // M1911 - sharp crack
+                    buildGunPcm(0.30f, 170f, 0.80f, 190f, 0.40f, 20f, 0.50f, 45f, 0.25f),  // MP5 - snappy
+                    buildGunPcm(0.45f, 120f, 0.95f, 120f, 0.70f, 13f, 0.80f, 85f, 0.35f),  // M4A1
+                    buildGunPcm(0.55f, 100f, 1.00f, 85f, 0.95f, 10f, 0.90f, 110f, 0.40f),  // SCAR-H - heavy
+                    buildGunPcm(1.10f, 70f, 1.00f, 60f, 1.15f, 5f, 1.00f, 170f, 0.50f)     // AWM - huge boom + echo
+                )
+                hitPcm = buildFleshHitPcm()
+                hurtPcm = buildHurtPcm()
+                pickupPcm = buildPickupPcm()
+                clickPcm = buildClickPcm(1)
+                reloadPcm = buildClickPcm(3)
+                boomPcm = buildExplosionPcm()
+                groan1Pcm = buildZombieGroanPcm(62.0, 44.0, 0.65)
+                groan2Pcm = buildZombieGroanPcm(84.0, 52.0, 0.55)
+                roarPcm = buildBossRoarPcm()
+            } catch (_: Throwable) {
             }
-        } catch (_: Exception) {
-        }
+            try {
+                val mp = MediaPlayer.create(context, R.raw.horror_bgm)?.apply {
+                    isLooping = true
+                    setVolume(0.35f, 0.35f)
+                }
+                bgmPlayer = mp
+                if (musicWanted && enabled) mp?.start()
+            } catch (_: Throwable) {
+            }
+        }, "sound-init").start()
     }
 
     fun resumeMusic() {
+        musicWanted = true
         if (!enabled) return
         try {
             if (bgmPlayer?.isPlaying == false) bgmPlayer?.start()
@@ -56,6 +91,7 @@ class SoundEngine(context: Context) {
     }
 
     fun pauseMusic() {
+        musicWanted = false
         try {
             if (bgmPlayer?.isPlaying == true) bgmPlayer?.pause()
         } catch (_: Exception) {
@@ -69,14 +105,28 @@ class SoundEngine(context: Context) {
             bgmPlayer = null
         } catch (_: Exception) {
         }
+        playExec.shutdown()
+        releaser.shutdown()
     }
 
-    fun playShot(isShotgun: Boolean = false) {
+    /** gunIndex: 0 M1911, 1 MP5, 2 M4A1, 3 SCAR-H, 4 AWM */
+    fun playShot(gunIndex: Int = 0) {
         if (!enabled) return
         val now = SystemClock.uptimeMillis()
-        if (now - lastShotMs < 55L) return
+        if (now - lastShotMs < 40L) return
         lastShotMs = now
-        enqueue(if (isShotgun) shotgunPcm else riflePcm)
+        val arr = gunPcm ?: return
+        enqueue(arr[gunIndex.coerceIn(0, arr.size - 1)])
+    }
+
+    fun playReload() {
+        if (!enabled) return
+        enqueue(reloadPcm)
+    }
+
+    fun playEmptyClick() {
+        if (!enabled) return
+        enqueue(clickPcm)
     }
 
     fun playHit() {
@@ -118,63 +168,110 @@ class SoundEngine(context: Context) {
         enqueue(clip)
     }
 
-    private fun enqueue(pcm: ShortArray) {
+    private fun enqueue(pcm: ShortArray?) {
+        if (pcm == null) return
         if (activeStreams.get() >= maxConcurrent) return
         activeStreams.incrementAndGet()
-        executor.execute {
-            var track: AudioTrack? = null
-            try {
-                val attrs = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_GAME)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-                val fmt = AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-                track = AudioTrack.Builder()
-                    .setAudioAttributes(attrs)
-                    .setAudioFormat(fmt)
-                    .setBufferSizeInBytes(pcm.size * 2)
-                    .setTransferMode(AudioTrack.MODE_STATIC)
-                    .build()
-                track.write(pcm, 0, pcm.size)
-                track.play()
-                val durationMs = (pcm.size * 1000L / sampleRate) + 15L
-                Thread.sleep(durationMs)
-            } catch (_: Exception) {
-            } finally {
+        try {
+            playExec.execute {
+                var track: AudioTrack? = null
                 try {
-                    track?.stop()
-                    track?.release()
-                } catch (_: Exception) {
+                    val attrs = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_GAME)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                    val fmt = AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                    track = AudioTrack.Builder()
+                        .setAudioAttributes(attrs)
+                        .setAudioFormat(fmt)
+                        .setBufferSizeInBytes(pcm.size * 2)
+                        .setTransferMode(AudioTrack.MODE_STATIC)
+                        .build()
+                    track.write(pcm, 0, pcm.size)
+                    track.play()
+                    val t = track
+                    val durationMs = (pcm.size * 1000L / sampleRate) + 40L
+                    // release later WITHOUT blocking the worker, so sounds overlap naturally
+                    releaser.schedule(Runnable {
+                        try { t.stop(); t.release() } catch (_: Exception) { }
+                        activeStreams.decrementAndGet()
+                    }, durationMs, TimeUnit.MILLISECONDS)
+                } catch (_: Throwable) {
+                    try { track?.release() } catch (_: Exception) { }
+                    activeStreams.decrementAndGet()
                 }
-                activeStreams.decrementAndGet()
+            }
+        } catch (_: Throwable) {
+            activeStreams.decrementAndGet()
+        }
+    }
+
+    /**
+     * Layered gunshot: sharp high-passed crack + pitched-down body thump + low rumbling tail + echo.
+     */
+    private fun buildGunPcm(
+        durSec: Float, crackDecay: Float, crackAmp: Float,
+        boomHz: Float, boomAmp: Float, boomDecay: Float,
+        tailAmp: Float, tailDecay: Float, echoGain: Float
+    ): ShortArray {
+        val echoDelay = (sampleRate * 0.085f).toInt()
+        val dry = (sampleRate * durSec).toInt()
+        val total = dry + echoDelay * 2
+        val buf = FloatArray(total)
+        var phase = 0.0
+        var lp = 0f
+        var hpPrevIn = 0f
+        var hpPrevOut = 0f
+        for (i in 0 until dry) {
+            val t = i.toFloat() / sampleRate
+            val n = Random.nextFloat() * 2f - 1f
+            // 1-pole high-pass for the crack
+            val hp = 0.92f * (hpPrevOut + n - hpPrevIn)
+            hpPrevIn = n; hpPrevOut = hp
+            val crack = hp * exp(-t * crackDecay) * crackAmp
+            // thump with downward pitch sweep
+            val f = boomHz * (0.55f + 0.9f * exp(-t * 38f))
+            phase += 2.0 * PI * f / sampleRate
+            val boom = sin(phase).toFloat() * exp(-t * boomDecay) * boomAmp
+            // rumbling low-passed noise tail
+            lp += (n - lp) * 0.07f
+            val tail = lp * exp(-t * tailDecay * 0.08f * 10f) * tailAmp * 1.6f
+            buf[i] = crack * 0.9f + boom + tail
+        }
+        // two soft echoes (distant reverb feel)
+        for (i in dry + echoDelay * 2 - 1 downTo echoDelay) {
+            val src = buf[i - echoDelay]
+            buf[i] += src * echoGain * (if (i >= echoDelay * 2) 0.55f else 1f) * 0.5f
+        }
+        val out = ShortArray(total)
+        var fade = 1f
+        for (i in 0 until total) {
+            if (i > total - 800) fade = (total - i) / 800f
+            out[i] = (tanh(buf[i] * 1.6f) * 30000f * fade).toInt().coerceIn(-32767, 32767).toShort()
+        }
+        return out
+    }
+
+    private fun buildClickPcm(clicks: Int): ShortArray {
+        val gap = (sampleRate * 0.16f).toInt()
+        val total = gap * clicks + (sampleRate * 0.06f).toInt()
+        val out = ShortArray(total)
+        for (c in 0 until clicks) {
+            val start = c * gap
+            val freq = if (c % 2 == 0) 2300.0 else 1500.0
+            for (i in 0 until (sampleRate * 0.05f).toInt()) {
+                val t = i.toFloat() / sampleRate
+                val env = exp(-t * 110f)
+                val v = (sin(2.0 * PI * freq * t).toFloat() * 0.6f + (Random.nextFloat() * 2f - 1f) * 0.4f) * env
+                val idx = start + i
+                if (idx < total) out[idx] = (v * 14000f).toInt().coerceIn(-32767, 32767).toShort()
             }
         }
-    }
-
-    private fun buildRiflePcm(): ShortArray {
-        val len = (sampleRate * 0.11).toInt()
-        return ShortArray(len) { i ->
-            val t = i.toFloat() / sampleRate
-            val env = exp(-t * 36f)
-            val snap = (Random.nextFloat() * 2f - 1f) * 0.72f
-            val bass = sin(2.0 * PI * (185.0 * exp(-t * 22f)) * t).toFloat() * 0.85f
-            ((snap + bass) * env * 22000f).toInt().coerceIn(-32767, 32767).toShort()
-        }
-    }
-
-    private fun buildShotgunPcm(): ShortArray {
-        val len = (sampleRate * 0.22).toInt()
-        return ShortArray(len) { i ->
-            val t = i.toFloat() / sampleRate
-            val env = exp(-t * 16f)
-            val blast = (Random.nextFloat() * 2f - 1f) * 0.88f
-            val boom = sin(2.0 * PI * (92.0 * exp(-t * 8f)) * t).toFloat() * 0.90f
-            ((blast + boom) * env * 26000f).toInt().coerceIn(-32767, 32767).toShort()
-        }
+        return out
     }
 
     private fun buildFleshHitPcm(): ShortArray {

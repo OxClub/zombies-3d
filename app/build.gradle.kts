@@ -19,7 +19,7 @@ android {
     }
 
     androidResources {
-        noCompress += listOf("wav", "png", "obj", "bin")
+        noCompress += listOf("wav", "png", "jpg", "obj")
     }
 
     signingConfigs {

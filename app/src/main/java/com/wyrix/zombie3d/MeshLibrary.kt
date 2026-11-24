@@ -15,6 +15,9 @@ object MeshLibrary {
 
     class Mesh(val buffer: FloatBuffer, val vertexCount: Int) {
         val strideBytes = 8 * 4
+        // GPU vertex buffer (re-created whenever the GL context is re-created)
+        var vbo = 0
+        var vboGen = -1
     }
 
     val box: Mesh = buildBoxMesh()
@@ -24,6 +27,7 @@ object MeshLibrary {
     val bulletMesh: Mesh = buildBulletMesh()
     val muzzleFlashMesh: Mesh = buildMuzzleFlashMesh()
     val bloodShardMesh: Mesh = buildBloodShardMesh()
+    val quad: Mesh = buildQuadMesh()
 
     val humanLimbMesh: Mesh = buildLoftedMesh(
         rings = listOf(
@@ -363,5 +367,18 @@ object MeshLibrary {
         }
         val arr = verts.toFloatArray()
         return Mesh(toFloatBuffer(arr), arr.size / 8)
+    }
+
+    // Unit quad in the XY plane facing +Z (used for billboards: flashes, smoke, sparks).
+    private fun buildQuadMesh(): Mesh {
+        val d = floatArrayOf(
+            -0.5f, -0.5f, 0f, 0f, 0f, 1f, 0f, 1f,
+             0.5f, -0.5f, 0f, 0f, 0f, 1f, 1f, 1f,
+             0.5f,  0.5f, 0f, 0f, 0f, 1f, 1f, 0f,
+            -0.5f, -0.5f, 0f, 0f, 0f, 1f, 0f, 1f,
+             0.5f,  0.5f, 0f, 0f, 0f, 1f, 1f, 0f,
+            -0.5f,  0.5f, 0f, 0f, 0f, 1f, 0f, 0f
+        )
+        return Mesh(toFloatBuffer(d), d.size / 8)
     }
 }
