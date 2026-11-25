@@ -433,7 +433,8 @@ class GameRenderer(
                 camZ = engine.playerZ - cos(yawRad).toFloat() * backDist + rightZ * sideOffset
                 // aim point lies on the bullet line (gun is 0.13 m to the right of the body centre)
                 val tx = engine.playerX + rightX * 0.13f + fwdX * 14f
-                val ty = 1.22f + fwdY * 14f
+                // Aim a little lower in TPP so the player's feet stay inside the viewport.
+                val ty = 1.05f + fwdY * 14f
                 val tz = engine.playerZ + rightZ * 0.13f + fwdZ * 14f
                 Matrix.setLookAtM(viewMatrix, 0, camX, camY, camZ, tx, ty, tz, 0f, 1f, 0f)
             } else {
@@ -840,7 +841,8 @@ class GameRenderer(
         val reloadTilt = if (reloading) sin(min(1f, engine.reloadTimer / 0.95f) * 3.14159f) * 28f else 0f
         Matrix.setIdentityM(gunLocal, 0)
         if (tpp) {
-            Matrix.translateM(gunLocal, 0, -0.10f, 1.22f, 0.14f - kick * 0.10f)
+            // Sara's supplied arms rest lower than the old soldier rig's weapon pose.
+            Matrix.translateM(gunLocal, 0, -0.10f, 0.96f, 0.22f - kick * 0.10f)
             Matrix.rotateM(gunLocal, 0, -pitch - kick * 7f + reloadTilt, 1f, 0f, 0f)
         } else {
             // first person: hold the gun lower-right in the camera view
@@ -865,9 +867,11 @@ class GameRenderer(
             drawMesh(MeshLibrary.disc, engine.playerX, 0.02f, engine.playerZ, 1.15f, 1f, 1.15f, 0f, texShadow, 1f, 1f, 1f, 1f, 1f, 0.85f)
         }
 
-        // Keep the supplied body and the existing animated arms aligned around the held weapon.
+        // Draw Sara slightly above the floor so both feet remain clear.
         if (tpp && suppliedPlayer != null) {
-            drawPartWith(suppliedPlayer, suppliedPlayer.part("body"), baseM, 1f, 1f, 1f)
+            System.arraycopy(baseM, 0, m8, 0, 16)
+            Matrix.translateM(m8, 0, 0f, 0.015f, 0f)
+            drawPartWith(suppliedPlayer, suppliedPlayer.part("body"), m8, 1f, 1f, 1f)
         }
 
         if (soldier != null) {
@@ -904,7 +908,10 @@ class GameRenderer(
             val tr = min(0.80f + hero.armorR * 0.55f, 1.15f)
             val tg = min(0.80f + hero.armorG * 0.55f, 1.15f)
             val tb = min(0.80f + hero.armorB * 0.55f, 1.15f)
-            drawHumanoid(soldier, baseM, pose, tr, tg, tb, true)
+            // Avoid drawing the soldier's IK arms over Sara's own arms in third person.
+            if (!(tpp && suppliedPlayer?.part("body") != null)) {
+                drawHumanoid(soldier, baseM, pose, tr, tg, tb, true)
+            }
         }
 
         // the gun itself (slide kicks back on each shot)
