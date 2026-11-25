@@ -1,0 +1,12 @@
+Character model asset attribution
+
+Player: "left 4 dead Sara"
+Author: Hafid Quispe (https://sketchfab.com/hafid.quispe)
+Source: https://sketchfab.com/3d-models/left-4-dead-sara-7ef7b83d86e049018483fa6e00092453
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+Changes: Converted to the game's OBJ mesh format and atlas textures. Both supplied
+GLB texture resolutions are included; the game selects one based on viewport width.
+
+Zombie: "Zombie mansion (Resident Evil: Deadly Silence)"
+Author: Mydunexlol (https://sketchfab.com/myduneXLOL)
+Source: https://sketchfab.com/3d-models/zombie-mansion-resident-evil-deadly-silence-7e98492a360c4acea
