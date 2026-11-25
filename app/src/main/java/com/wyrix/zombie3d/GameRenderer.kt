@@ -945,4 +945,338 @@ class GameRenderer(
         val flash = z.hitFlash > 0f
         val vt = variantTint[z.gaitStyle and 3]
         var r = vt[0]; var g = vt[1]; var b = vt[2]
-        // Mute the red cast of the bloodied atlas for a colder, more natural infecte
+        // Mute the red cast of the bloodied atlas for a colder, more natural infected skin tone.
+        r *= 0.88f; g *= 0.93f; b *= 0.89f
+        if (z.type == 3) { r *= 1.02f; g *= 0.91f; b *= 0.87f }
+        if (flash) { r = 1.16f; g = 0.74f; b = 0.69f }
+
+        Matrix.setIdentityM(baseM, 0)
+        Matrix.translateM(baseM, 0, z.x, 0f, z.z)
+        Matrix.rotateM(baseM, 0, z.yaw, 0f, 1f, 0f)
+
+        val ph = z.animPhase
+        if (z.type == 6) {
+            drawDog(model, z, r, g, b)
+            return
+        }
+        val suppliedBody = model.part("body")
+        if (suppliedBody != null) {
+            Matrix.scaleM(baseM, 0, s, s, s)
+            Matrix.translateM(baseM, 0, 0f, 0.92f, 0f)
+            val bodyLean = if (z.isAttacking) 13f + 3f * sin(ph * 2f) else 7f + 2f * sin(ph)
+            Matrix.rotateM(baseM, 0, bodyLean, 1f, 0f, 0f)
+            Matrix.translateM(baseM, 0, 0f, -0.92f, 0f)
+            Matrix.translateM(baseM, 0, 0f, abs(sin(ph)) * 0.035f, 0f)
+            drawPartWith(model, suppliedBody, baseM, r, g, b)
+            return
+        }
+        Matrix.scaleM(baseM, 0, s, s, s)
+        Matrix.translateM(baseM, 0, 0f, abs(sin(ph)) * 0.035f, 0f)
+
+        pose.reset()
+        val sw = sin(ph)
+        when {
+            z.isAttacking -> {
+                // arms raised and clawing, body lunging
+                val claw = sin(ph * 2.2f)
+                pose.lean = 15f + 4f * abs(claw)
+                pose.shL = -78f + claw * 16f
+                pose.shR = -78f - claw * 16f
+                pose.elL = -25f; pose.elR = -25f
+                pose.headX = 14f
+                pose.hipL = 6f; pose.hipR = -6f
+                pose.kneeL = 10f; pose.kneeR = 10f
+            }
+            z.gaitStyle == 2 || z.type == 1 -> {
+                // fast, frantic run
+                pose.lean = 18f
+                pose.hipL = sw * 36f; pose.hipR = -sw * 36f
+                pose.kneeL = 8f + max(0f, -sw) * 48f; pose.kneeR = 8f + max(0f, sw) * 48f
+                pose.shL = -sw * 42f; pose.shR = sw * 42f
+                pose.elL = -75f; pose.elR = -75f
+                pose.headX = 8f
+            }
+            z.gaitStyle == 1 -> {
+                // dragging limp, one arm reaching
+                pose.lean = 12f
+                pose.hipL = sw * 18f; pose.hipR = -sw * 30f
+                pose.kneeL = 4f; pose.kneeR = 6f + max(0f, sw) * 36f
+                pose.shL = -78f + sin(ph * 0.5f) * 7f
+                pose.shR = -12f + sw * 12f
+                pose.elL = -12f; pose.elR = -30f
+                pose.headX = 18f; pose.headY = sin(ph * 0.5f) * 14f
+            }
+            z.type == 2 || z.type == 3 -> {
+                // heavy stomp
+                pose.lean = 7f
+                pose.hipL = sw * 24f; pose.hipR = -sw * 24f
+                pose.kneeL = 5f + max(0f, -sw) * 24f; pose.kneeR = 5f + max(0f, sw) * 24f
+                pose.shL = -38f + sw * 11f; pose.shR = -38f - sw * 11f
+                pose.shSideL = -12f; pose.shSideR = 12f
+                pose.elL = -30f; pose.elR = -30f
+                pose.headX = 6f
+            }
+            else -> {
+                // classic shamble, arms outstretched
+                pose.lean = 9f
+                pose.hipL = sw * 24f; pose.hipR = -sw * 24f
+                pose.kneeL = 5f + max(0f, -sw) * 28f; pose.kneeR = 5f + max(0f, sw) * 28f
+                pose.shL = -60f + sin(ph * 0.5f) * 7f
+                pose.shR = -56f - sin(ph * 0.5f) * 7f
+                pose.elL = -14f; pose.elR = -18f
+                pose.headX = 12f; pose.headY = sin(ph * 0.5f) * 7f
+            }
+        }
+        drawHumanoid(model, baseM, pose, r, g, b)
+    }
+
+    private fun drawDog(model: PartModel, z: GameEngine.Zombie3D, r: Float, g: Float, b: Float) {
+        val s = z.scale
+        Matrix.scaleM(baseM, 0, s, s, s)
+        val ph = z.animPhase
+        val sw = sin(ph)
+        Matrix.translateM(baseM, 0, 0f, abs(sw) * 0.05f, 0f)
+        val body = model.part("body")
+        val head = model.part("head")
+        val jaw = model.part("jaw")
+        val tail = model.part("tail")
+        if (body != null) {
+            joint(baseM, body, sw * 3f, 0f, 0f, m1)
+            drawPartWith(model, body, m1, r, g, b)
+        } else System.arraycopy(baseM, 0, m1, 0, 16)
+        if (head != null) {
+            joint(m1, head, sin(ph * 2f) * 6f + (if (z.isAttacking) -6f else 0f), sin(ph) * 5f, 0f, m2)
+            drawPartWith(model, head, m2, r, g, b)
+            if (jaw != null) {
+                val open = if (z.isAttacking) 24f + 12f * sin(ph * 3f) else 5f
+                joint(m2, jaw, open, 0f, 0f, m3)
+                drawPartWith(model, jaw, m3, r, g, b)
+            }
+        }
+        if (tail != null) {
+            joint(m1, tail, -20f, sin(ph * 1.5f) * 26f, 0f, m4)
+            drawPartWith(model, tail, m4, r, g, b)
+        }
+        val legs = arrayOf("FL", "FR", "BL", "BR")
+        val phaseOffset = floatArrayOf(0f, 3.14159f, 3.14159f, 0f)
+        for (i in 0..3) {
+            val up = model.part("leg_upper_" + legs[i]) ?: continue
+            val lo = model.part("leg_lower_" + legs[i]) ?: continue
+            val swing = sin(ph + phaseOffset[i]) * 44f
+            joint(m1, up, -swing, 0f, 0f, m5)
+            joint(m5, lo, 14f + max(0f, swing) * 0.9f, 0f, 0f, m6)
+            drawPartWith(model, up, m5, r, g, b)
+            drawPartWith(model, lo, m6, r, g, b)
+        }
+    }
+
+    private fun drawCorpse(c: GameEngine.Corpse3D) {
+        if (!inView(c.x, 0.3f, c.z, 2.5f)) return
+        val model = ModelBank.get(zombieModelName(c.type)) ?: return
+        val fall = (c.age / 0.55f).coerceIn(0f, 1f)
+        val ease = 1f - (1f - fall) * (1f - fall)
+        val sink = if (c.age > 6f) (c.age - 6f) * 0.25f else 0f
+        Matrix.setIdentityM(baseM, 0)
+        Matrix.translateM(baseM, 0, c.x, -sink, c.z)
+        Matrix.rotateM(baseM, 0, c.yaw, 0f, 1f, 0f)
+        Matrix.scaleM(baseM, 0, c.scale, c.scale, c.scale)
+        val vt = variantTint[c.gait and 3]
+        val dark = 0.72f
+        if (c.type == 6) {
+            Matrix.translateM(baseM, 0, 0f, 0.10f * ease, 0f)
+            Matrix.rotateM(baseM, 0, 88f * ease, 0f, 0f, 1f)
+            for (part in model.parts.values) drawPartWith(model, part, baseM, vt[0] * dark, vt[1] * dark, vt[2] * dark)
+            return
+        }
+        Matrix.translateM(baseM, 0, 0f, 0.14f * ease, 0f)
+        Matrix.rotateM(baseM, 0, -90f * ease, 1f, 0f, 0f)
+        pose.reset()
+        pose.shSideL = -28f * ease; pose.shSideR = 28f * ease
+        pose.hipL = 6f * ease; pose.hipR = -10f * ease
+        pose.elL = -10f; pose.elR = -10f
+        drawHumanoid(model, baseM, pose, vt[0] * dark, vt[1] * dark, vt[2] * dark)
+    }
+
+    // ============================================================================================
+    // Effects: muzzle flash, sparks, smoke, shell casings, tracers, blood
+    // ============================================================================================
+
+    private fun handleShotEffects() {
+        if (engine.shotCounter == lastShotSeen) return
+        lastShotSeen = engine.shotCounter
+        val fx0 = lastFwdX; val fy0 = lastFwdY; val fz0 = lastFwdZ
+        val rx = -fz0; val rz = fx0 // horizontal vector perpendicular to the aim direction
+        val mx = muzzleWorld[0]; val my = muzzleWorld[1]; val mz = muzzleWorld[2]
+        // sparks
+        for (i in 0 until 8) {
+            val sp = 4f + Random.nextFloat() * 7f
+            fx.add(Fx(0, mx, my, mz,
+                fx0 * sp + (Random.nextFloat() - 0.5f) * 3f,
+                fy0 * sp + (Random.nextFloat() - 0.2f) * 2.5f,
+                fz0 * sp + (Random.nextFloat() - 0.5f) * 3f,
+                0.10f + Random.nextFloat() * 0.14f, 0.24f, 0.035f + Random.nextFloat() * 0.03f, 0f))
+        }
+        // smoke
+        for (i in 0 until 3) {
+            fx.add(Fx(1, mx, my, mz,
+                fx0 * 0.9f + (Random.nextFloat() - 0.5f) * 0.6f,
+                0.45f + Random.nextFloat() * 0.5f,
+                fz0 * 0.9f + (Random.nextFloat() - 0.5f) * 0.6f,
+                0.8f + Random.nextFloat() * 0.5f, 1.3f, 0.12f + Random.nextFloat() * 0.06f, Random.nextFloat() * 360f))
+        }
+        // ejected brass (flies out to the right of the gun)
+        fx.add(Fx(2, shellPortWorldX, shellPortWorldY, shellPortWorldZ,
+            rx * (1.6f + Random.nextFloat()) + (Random.nextFloat() - 0.5f) * 0.5f,
+            1.6f + Random.nextFloat() * 1.2f,
+            rz * (1.6f + Random.nextFloat()) + (Random.nextFloat() - 0.5f) * 0.5f,
+            1.3f, 1.3f, 1f, Random.nextFloat() * 360f))
+        while (fx.size > 90) fx.removeAt(0)
+    }
+
+    private fun billboard(x: Float, y: Float, z: Float, size: Float, rotDeg: Float) {
+        val v = viewMatrix
+        Matrix.setIdentityM(modelMatrix, 0)
+        // camera right, up, back vectors (rows of the view matrix) form the sprite basis
+        modelMatrix[0] = v[0]; modelMatrix[1] = v[4]; modelMatrix[2] = v[8]
+        modelMatrix[4] = v[1]; modelMatrix[5] = v[5]; modelMatrix[6] = v[9]
+        modelMatrix[8] = v[2]; modelMatrix[9] = v[6]; modelMatrix[10] = v[10]
+        modelMatrix[12] = x; modelMatrix[13] = y; modelMatrix[14] = z
+        if (rotDeg != 0f) Matrix.rotateM(modelMatrix, 0, rotDeg, 0f, 0f, 1f)
+        Matrix.scaleM(modelMatrix, 0, size, size, size)
+    }
+
+    private fun drawEffects(dt: Float) {
+        // --- tracers (unlit, additive) ---
+        GLES20.glUniform1f(uUnlit, 1f)
+        GLES20.glDepthMask(false)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
+        for (bl in engine.bullets) {
+            drawMesh(MeshLibrary.bulletMesh, bl.x, bl.y, bl.z, 0.022f, 0.022f, 1.6f, bl.yaw, 0, 1f, 1f, 1.0f, 0.82f, 0.45f, 0.9f)
+        }
+
+        // --- muzzle flash: rotated additive sprites + a cone of fire along the barrel ---
+        if (engine.muzzleFlashTimer > 0f) {
+            val k = (engine.muzzleFlashTimer / 0.07f).coerceIn(0f, 1f)
+            val big = 0.50f + Random.nextFloat() * 0.25f
+            billboard(muzzleWorld[0], muzzleWorld[1], muzzleWorld[2], big * (0.7f + 0.5f * k), Random.nextFloat() * 360f)
+            submitMesh(MeshLibrary.quad, texFlash, 1f, 1f, 1f, 0.95f, 0.8f, 1f)
+            billboard(muzzleWorld[0] + lastFwdX * 0.12f, muzzleWorld[1] + lastFwdY * 0.12f, muzzleWorld[2] + lastFwdZ * 0.12f, big * 0.55f, Random.nextFloat() * 360f)
+            submitMesh(MeshLibrary.quad, texFlash, 1f, 1f, 1f, 1f, 0.9f, 1f)
+            val yaw = Math.toDegrees(atan2(lastFwdX.toDouble(), lastFwdZ.toDouble())).toFloat()
+            drawMesh(MeshLibrary.muzzleFlashMesh, muzzleWorld[0], muzzleWorld[1], muzzleWorld[2], 0.30f, 0.30f, 0.85f * (0.6f + 0.6f * k), yaw, 0, 1f, 1f, 1.0f, 0.70f, 0.25f, 0.95f)
+        }
+
+        // --- advance all effects, draw sparks (additive) ---
+        var i = 0
+        while (i < fx.size) {
+            val f = fx[i]
+            f.life -= dt
+            if (f.life <= 0f) { fx.removeAt(i); continue }
+            f.x += f.vx * dt; f.y += f.vy * dt; f.z += f.vz * dt
+            if (f.kind == 0) {
+                val a = f.life / f.maxLife
+                billboard(f.x, f.y, f.z, f.size * (0.6f + a), 0f)
+                submitMesh(MeshLibrary.quad, texFlash, 1f, 1f, 1f, 0.8f, 0.45f, a)
+            }
+            i++
+        }
+
+        // --- smoke (alpha blended) ---
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        for (f in fx) {
+            if (f.kind != 1) continue
+            val t = 1f - f.life / f.maxLife
+            f.vy *= (1f - 0.8f * dt)
+            val sz = f.size + t * 0.55f
+            billboard(f.x, f.y, f.z, sz, f.rot)
+            submitMesh(MeshLibrary.quad, texSmoke, 1f, 1f, 0.82f, 0.82f, 0.82f, (1f - t) * 0.55f)
+        }
+        GLES20.glDepthMask(true)
+
+        // --- brass casings (lit, tiny boxes with gravity and a bounce) ---
+        GLES20.glUniform1f(uUnlit, 0f)
+        for (f in fx) {
+            if (f.kind != 2) continue
+            f.vy -= 9.8f * dt
+            if (f.y < 0.02f) {
+                f.y = 0.02f
+                f.vy = abs(f.vy) * 0.35f
+                f.vx *= 0.5f; f.vz *= 0.5f
+            }
+            f.rot += 540f * dt
+            drawMesh(MeshLibrary.box, f.x, f.y, f.z, 0.012f, 0.012f, 0.042f, f.rot, 0, 1f, 1f, 0.88f, 0.68f, 0.24f, 1f)
+        }
+
+        // --- blood from the engine ---
+        for (pt in engine.particles) {
+            drawMesh(MeshLibrary.bloodShardMesh, pt.x, pt.y, pt.z, pt.size * 0.7f, pt.size * 1.5f, pt.size * 0.7f, pt.rotDeg, 0, 1f, 1f, pt.r, pt.g, pt.b, 0.92f)
+        }
+    }
+
+    // ============================================================================================
+    // Draw helpers
+    // ============================================================================================
+
+    private fun drawMesh(
+        mesh: MeshLibrary.Mesh,
+        x: Float, y: Float, z: Float,
+        sx: Float, sy: Float, sz: Float,
+        yawDeg: Float,
+        texId: Int, uvX: Float, uvY: Float,
+        r: Float, g: Float, b: Float, a: Float
+    ) {
+        Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.translateM(modelMatrix, 0, x, y, z)
+        if (yawDeg != 0f) Matrix.rotateM(modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+        Matrix.scaleM(modelMatrix, 0, sx, sy, sz)
+        submitMesh(mesh, texId, uvX, uvY, r, g, b, a)
+    }
+
+    private var boundVbo = -1
+
+    /** Uploads the mesh to the GPU once per GL context and binds it. */
+    private fun bindVbo(mesh: MeshLibrary.Mesh) {
+        if (mesh.vboGen != glGen || mesh.vbo == 0) {
+            val ids = IntArray(1)
+            GLES20.glGenBuffers(1, ids, 0)
+            mesh.vbo = ids[0]
+            mesh.vboGen = glGen
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, mesh.vbo)
+            mesh.buffer.position(0)
+            GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, mesh.vertexCount * mesh.strideBytes, mesh.buffer, GLES20.GL_STATIC_DRAW)
+            boundVbo = mesh.vbo
+            return
+        }
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, mesh.vbo)
+        boundVbo = mesh.vbo
+    }
+
+    private fun submitMesh(
+        mesh: MeshLibrary.Mesh,
+        texId: Int, uvX: Float, uvY: Float,
+        r: Float, g: Float, b: Float, a: Float
+    ) {
+        bindVbo(mesh)
+        GLES20.glEnableVertexAttribArray(aPos)
+        GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, mesh.strideBytes, 0)
+        GLES20.glEnableVertexAttribArray(aNormal)
+        GLES20.glVertexAttribPointer(aNormal, 3, GLES20.GL_FLOAT, false, mesh.strideBytes, 12)
+        GLES20.glEnableVertexAttribArray(aUv)
+        GLES20.glVertexAttribPointer(aUv, 2, GLES20.GL_FLOAT, false, mesh.strideBytes, 24)
+
+        if (texId != 0) {
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
+            GLES20.glUniform1f(uUseTex, 1f)
+        } else {
+            GLES20.glUniform1f(uUseTex, 0f)
+        }
+
+        Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModel, 1, false, modelMatrix, 0)
+        GLES20.glUniformMatrix4fv(uMvp, 1, false, mvpMatrix, 0)
+        GLES20.glUniform2f(uUvScale, uvX, uvY)
+        GLES20.glUniform4f(uTint, r, g, b, a)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, mesh.vertexCount)
+    }
+}

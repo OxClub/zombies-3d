@@ -9,4 +9,7 @@ GLB texture resolutions are included; the game selects one based on viewport wid
 
 Zombie: "Zombie mansion (Resident Evil: Deadly Silence)"
 Author: Mydunexlol (https://sketchfab.com/myduneXLOL)
-Source: https://sketchfab.com/3d-models/zombie-mansion-resident-evil-deadly-silence-7e98492a360c4acea
+Source: https://sketchfab.com/3d-models/zombie-mansion-resident-evil-deadly-silence-7e98492a360c4acea27fac1ef88e5957
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+Changes: Converted to the game's OBJ mesh format, baked to the supplied rig's bind
+pose, and normalized for the game's character scale.

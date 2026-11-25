@@ -195,4 +195,60 @@ object ModelBank {
 
         for ((fi, f) in b.faces.withIndex()) {
             val i0 = f[0] * 3; val i1 = f[2] * 3; val i2 = f[4] * 3
-            val ux = p[i1] - p[i0]; val uy = p[i
+            val ux = p[i1] - p[i0]; val uy = p[i1 + 1] - p[i0 + 1]; val uz = p[i1 + 2] - p[i0 + 2]
+            val vx = p[i2] - p[i0]; val vy = p[i2 + 1] - p[i0 + 1]; val vz = p[i2 + 2] - p[i0 + 2]
+            val nx = uy * vz - uz * vy
+            val ny = uz * vx - ux * vz
+            val nz = ux * vy - uy * vx
+            faceN[fi * 3] = nx; faceN[fi * 3 + 1] = ny; faceN[fi * 3 + 2] = nz
+            for (k in 0..2) {
+                val vi = f[k * 2] * 3
+                cx += p[vi]; cy += p[vi + 1]; cz += p[vi + 2]; cn++
+                val kk = key(p[vi], p[vi + 1], p[vi + 2])
+                val acc = smooth.getOrPut(kk) { FloatArray(3) }
+                acc[0] += nx; acc[1] += ny; acc[2] += nz
+            }
+        }
+        cx /= cn; cy /= cn; cz /= cn
+
+        // Decide whether winding points outward (so lighting is never inverted).
+        var outward = 0f
+        for ((fi, f) in b.faces.withIndex()) {
+            val vi = f[0] * 3
+            outward += faceN[fi * 3] * (p[vi] - cx) + faceN[fi * 3 + 1] * (p[vi + 1] - cy) + faceN[fi * 3 + 2] * (p[vi + 2] - cz)
+        }
+        val flip = if (outward < 0f) -1f else 1f
+
+        var o = 0
+        for ((fi, f) in b.faces.withIndex()) {
+            for (k in 0..2) {
+                val vi = f[k * 2] * 3
+                val ti = f[k * 2 + 1] * 2
+                val acc = smooth[key(p[vi], p[vi + 1], p[vi + 2])]!!
+                var nx: Float; var ny: Float; var nz: Float
+                if (smoothNormals) {
+                    nx = acc[0] * flip; ny = acc[1] * flip; nz = acc[2] * flip
+                } else {
+                    nx = faceN[fi * 3] * flip; ny = faceN[fi * 3 + 1] * flip; nz = faceN[fi * 3 + 2] * flip
+                }
+                val l = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-6f)
+                nx /= l; ny /= l; nz /= l
+                verts[o++] = p[vi]; verts[o++] = p[vi + 1]; verts[o++] = p[vi + 2]
+                verts[o++] = nx; verts[o++] = ny; verts[o++] = nz
+                if (ti >= 0 && ti + 1 < t.size) {
+                    verts[o++] = t[ti]; verts[o++] = 1f - t[ti + 1]
+                } else { verts[o++] = 0f; verts[o++] = 0f }
+            }
+        }
+        val fb: FloatBuffer = ByteBuffer.allocateDirect(verts.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        fb.put(verts); fb.position(0)
+        return ModelPart(b.name, MeshLibrary.Mesh(fb, nTri * 3), b.pivot[0], b.pivot[1], b.pivot[2])
+    }
+
+    private class FloatList {
+        private var a = FloatArray(1 shl 16)
+        private var n = 0
+        fun add(v: Float) { if (n == a.size) a = a.copyOf(n * 2); a[n++] = v }
+        fun toArray(): FloatArray = a.copyOf(n)
+    }
+}
