@@ -32,6 +32,7 @@ object ModelBank {
 
     val names = listOf(
         "zombie_male", "zombie_female", "zombie_brute", "infected_dog", "player_soldier",
+        "zombie_re1", "player_sara", "player_sara_lite",
         "gun_m1911", "gun_mp5", "gun_m4a1", "gun_scar", "gun_awm"
     )
 
@@ -81,16 +82,20 @@ object ModelBank {
     }
 
     private fun loadModel(context: Context, name: String): PartModel? {
-        val bytes = context.assets.open("models/$name.obj").use { it.readBytes() }
+        // The two supplied Sara files share the same mesh and use separate texture resolutions.
+        val meshName = if (name == "player_sara_lite") "player_sara" else name
+        val bytes = context.assets.open("models/$meshName.obj").use { it.readBytes() }
         val parts = parseObj(bytes, smoothNormals = !name.startsWith("gun_"))
         if (parts.isEmpty()) return null
-        val jpeg = try {
+        val textureBytes = try {
             context.assets.open("models/$name.jpg").use { it.readBytes() }
         } catch (_: Throwable) {
-            null
+            try {
+                context.assets.open("models/$name.png").use { it.readBytes() }
+            } catch (_: Throwable) { null }
         }
-        val bmp = jpeg?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-        return PartModel(parts, bmp, jpeg)
+        val bmp = textureBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+        return PartModel(parts, bmp, textureBytes)
     }
 
     // ---- fast OBJ parser -------------------------------------------------------------------
