@@ -749,6 +749,10 @@ class GameRenderer(
     private val pose = Pose()
 
     private fun drawHumanoid(model: PartModel, base: FloatArray, p: Pose, r: Float, g: Float, b: Float, humanSkin: Boolean = false) {
+        // Hero color tints the uniform; keep exposed skin on a neutral, warm grade.
+        val skinR = if (humanSkin) 1.04f else r
+        val skinG = if (humanSkin) 1.01f else g
+        val skinB = if (humanSkin) 0.96f else b
         val pelvis = model.part("pelvis")
         val torso = model.part("torso")
         val head = model.part("head")
@@ -763,8 +767,7 @@ class GameRenderer(
             drawPartWith(model, torso, m1, r, g, b)
             if (head != null) {
                 joint(m1, head, p.headX, p.headY, 0f, m2)
-                if (humanSkin) drawPartWith(model, head, m2, r * 1.30f, g * 0.92f, b * 0.80f)
-                else drawPartWith(model, head, m2, r, g, b)
+                drawPartWith(model, head, m2, skinR, skinG, skinB)
             }
             // legs
             val luL = model.part("leg_upper_L"); val llL = model.part("leg_lower_L"); val fL = model.part("foot_L")
@@ -785,20 +788,20 @@ class GameRenderer(
 
         // arms
         if (p.useIk) {
-            drawPartWith(model, auL, upperArm[0], r, g, b); drawPartWith(model, alL, lowerArm[0], r, g, b); drawPartWith(model, hL, lowerArm[0], r, g, b)
-            drawPartWith(model, auR, upperArm[1], r, g, b); drawPartWith(model, alR, lowerArm[1], r, g, b); drawPartWith(model, hR, lowerArm[1], r, g, b)
+            drawPartWith(model, auL, upperArm[0], r, g, b); drawPartWith(model, alL, lowerArm[0], r, g, b); drawPartWith(model, hL, lowerArm[0], skinR, skinG, skinB)
+            drawPartWith(model, auR, upperArm[1], r, g, b); drawPartWith(model, alR, lowerArm[1], r, g, b); drawPartWith(model, hR, lowerArm[1], skinR, skinG, skinB)
         } else {
             if (auL != null && alL != null && hL != null) {
                 joint(m1, auL, p.shL, 0f, p.shSideL, m6)
                 joint(m6, alL, p.elL, 0f, 0f, m7)
                 joint(m7, hL, 0f, 0f, 0f, m8)
-                drawPartWith(model, auL, m6, r, g, b); drawPartWith(model, alL, m7, r, g, b); drawPartWith(model, hL, m8, r, g, b)
+                drawPartWith(model, auL, m6, r, g, b); drawPartWith(model, alL, m7, r, g, b); drawPartWith(model, hL, m8, skinR, skinG, skinB)
             }
             if (auR != null && alR != null && hR != null) {
                 joint(m1, auR, p.shR, 0f, p.shSideR, m6)
                 joint(m6, alR, p.elR, 0f, 0f, m7)
                 joint(m7, hR, 0f, 0f, 0f, m8)
-                drawPartWith(model, auR, m6, r, g, b); drawPartWith(model, alR, m7, r, g, b); drawPartWith(model, hR, m8, r, g, b)
+                drawPartWith(model, auR, m6, r, g, b); drawPartWith(model, alR, m7, r, g, b); drawPartWith(model, hR, m8, skinR, skinG, skinB)
             }
         }
     }
@@ -919,11 +922,12 @@ class GameRenderer(
         else -> "zombie_male"
     }
 
+    // Keep skin variation subtle and earthy so gait styles do not read as bright color variants.
     private val variantTint = arrayOf(
         floatArrayOf(1.00f, 1.00f, 1.00f),
-        floatArrayOf(0.92f, 1.02f, 0.90f),
-        floatArrayOf(1.04f, 0.94f, 0.90f),
-        floatArrayOf(0.90f, 0.96f, 1.04f)
+        floatArrayOf(0.97f, 0.99f, 0.94f),
+        floatArrayOf(1.00f, 0.96f, 0.92f),
+        floatArrayOf(0.95f, 0.98f, 0.99f)
     )
 
     private fun drawZombie(z: GameEngine.Zombie3D) {
@@ -935,10 +939,10 @@ class GameRenderer(
         val flash = z.hitFlash > 0f
         val vt = variantTint[z.gaitStyle and 3]
         var r = vt[0]; var g = vt[1]; var b = vt[2]
-        // grimy, sickly look: darker and slightly desaturated so they read as rotting, not plastic
-        r *= 0.93f; g *= 0.91f; b *= 0.88f
-        if (z.type == 3) { r *= 1.05f; g *= 0.68f; b *= 0.66f }
-        if (flash) { r = 1.35f; g = 0.45f; b = 0.45f }
+        // Mute the red cast of the bloodied atlas for a colder, more natural infected skin tone.
+        r *= 0.88f; g *= 0.93f; b *= 0.89f
+        if (z.type == 3) { r *= 1.02f; g *= 0.91f; b *= 0.87f }
+        if (flash) { r = 1.16f; g = 0.74f; b = 0.69f }
 
         Matrix.setIdentityM(baseM, 0)
         Matrix.translateM(baseM, 0, z.x, 0f, z.z)
@@ -958,9 +962,9 @@ class GameRenderer(
             z.isAttacking -> {
                 // arms raised and clawing, body lunging
                 val claw = sin(ph * 2.2f)
-                pose.lean = 20f + 6f * abs(claw)
-                pose.shL = -95f + claw * 22f
-                pose.shR = -95f - claw * 22f
+                pose.lean = 15f + 4f * abs(claw)
+                pose.shL = -78f + claw * 16f
+                pose.shR = -78f - claw * 16f
                 pose.elL = -25f; pose.elR = -25f
                 pose.headX = 14f
                 pose.hipL = 6f; pose.hipR = -6f
@@ -968,42 +972,42 @@ class GameRenderer(
             }
             z.gaitStyle == 2 || z.type == 1 -> {
                 // fast, frantic run
-                pose.lean = 24f
-                pose.hipL = sw * 46f; pose.hipR = -sw * 46f
-                pose.kneeL = 10f + max(0f, -sw) * 62f; pose.kneeR = 10f + max(0f, sw) * 62f
-                pose.shL = -sw * 55f; pose.shR = sw * 55f
+                pose.lean = 18f
+                pose.hipL = sw * 36f; pose.hipR = -sw * 36f
+                pose.kneeL = 8f + max(0f, -sw) * 48f; pose.kneeR = 8f + max(0f, sw) * 48f
+                pose.shL = -sw * 42f; pose.shR = sw * 42f
                 pose.elL = -75f; pose.elR = -75f
                 pose.headX = 8f
             }
             z.gaitStyle == 1 -> {
                 // dragging limp, one arm reaching
-                pose.lean = 14f
-                pose.hipL = sw * 20f; pose.hipR = -sw * 34f
+                pose.lean = 12f
+                pose.hipL = sw * 18f; pose.hipR = -sw * 30f
                 pose.kneeL = 4f; pose.kneeR = 6f + max(0f, sw) * 36f
-                pose.shL = -88f + sin(ph * 0.5f) * 10f
+                pose.shL = -78f + sin(ph * 0.5f) * 7f
                 pose.shR = -12f + sw * 12f
                 pose.elL = -12f; pose.elR = -30f
                 pose.headX = 18f; pose.headY = sin(ph * 0.5f) * 14f
             }
             z.type == 2 || z.type == 3 -> {
                 // heavy stomp
-                pose.lean = 9f
-                pose.hipL = sw * 28f; pose.hipR = -sw * 28f
-                pose.kneeL = 6f + max(0f, -sw) * 30f; pose.kneeR = 6f + max(0f, sw) * 30f
-                pose.shL = -42f + sw * 14f; pose.shR = -42f - sw * 14f
+                pose.lean = 7f
+                pose.hipL = sw * 24f; pose.hipR = -sw * 24f
+                pose.kneeL = 5f + max(0f, -sw) * 24f; pose.kneeR = 5f + max(0f, sw) * 24f
+                pose.shL = -38f + sw * 11f; pose.shR = -38f - sw * 11f
                 pose.shSideL = -12f; pose.shSideR = 12f
                 pose.elL = -30f; pose.elR = -30f
                 pose.headX = 6f
             }
             else -> {
                 // classic shamble, arms outstretched
-                pose.lean = 12f
-                pose.hipL = sw * 30f; pose.hipR = -sw * 30f
-                pose.kneeL = 6f + max(0f, -sw) * 36f; pose.kneeR = 6f + max(0f, sw) * 36f
-                pose.shL = -78f + sin(ph * 0.5f) * 9f
-                pose.shR = -74f - sin(ph * 0.5f) * 9f
+                pose.lean = 9f
+                pose.hipL = sw * 24f; pose.hipR = -sw * 24f
+                pose.kneeL = 5f + max(0f, -sw) * 28f; pose.kneeR = 5f + max(0f, sw) * 28f
+                pose.shL = -60f + sin(ph * 0.5f) * 7f
+                pose.shR = -56f - sin(ph * 0.5f) * 7f
                 pose.elL = -14f; pose.elR = -18f
-                pose.headX = 16f; pose.headY = sin(ph * 0.5f) * 10f
+                pose.headX = 12f; pose.headY = sin(ph * 0.5f) * 7f
             }
         }
         drawHumanoid(model, baseM, pose, r, g, b)
